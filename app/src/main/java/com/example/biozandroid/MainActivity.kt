@@ -13,10 +13,13 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelUuid
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -67,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private val availableCharacteristics = mutableStateListOf<BluetoothGattCharacteristic>()
     private val notifications = mutableStateListOf<String>()
     private var gatt: BluetoothGatt? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     private val blePermissions: Array<String>
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -223,7 +227,15 @@ class MainActivity : ComponentActivity() {
 
     private fun startScan() {
         if (isScanning) return
-        val adapter = bluetoothAdapter ?: return
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            connectionState = "Bluetooth unavailable"
+            return
+        }
+        if (!adapter.isEnabled) {
+            connectionState = "Enable Bluetooth to start scanning"
+            return
+        }
         val scanner: BluetoothLeScanner? = adapter.bluetoothLeScanner
         if (scanner == null) {
             connectionState = "Bluetooth scanner unavailable"
@@ -232,14 +244,27 @@ class MainActivity : ComponentActivity() {
         scanResults.clear()
         isScanning = true
         connectionState = "Scanning..."
-        scanner.startScan(scanCallback)
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        scanner.startScan(null, settings, scanCallback)
+        handler.postDelayed({
+            if (isScanning) {
+                stopScan()
+                if (scanResults.isEmpty()) {
+                    connectionState = "No devices found"
+                }
+            }
+        }, SCAN_TIMEOUT_MS)
     }
 
     private fun stopScan() {
         if (!isScanning) return
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
         isScanning = false
-        connectionState = "Scan stopped"
+        if (connectionState == "Scanning...") {
+            connectionState = "Scan stopped"
+        }
     }
 
     private fun connectToDevice(device: BluetoothDevice) {
@@ -288,6 +313,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private const val SCAN_TIMEOUT_MS = 10_000L
     }
 }
 
